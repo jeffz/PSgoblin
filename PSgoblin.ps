@@ -1,0 +1,266 @@
+%!PS
+% PSgoblin.ps a proof of concept irc bot
+% Copyright (C) 2007 Jeff Zaroyko
+% This program is free software; you can redistribute it and/or
+% modify it under the terms of the GNU General Public License
+% as published by the Free Software Foundation; either version 2
+% of the License, or (at your option) any later version.
+
+% This program is distributed in the hope that it will be useful,
+% but WITHOUT ANY WARRANTY; without even the implied warranty of
+% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+% GNU General Public License for more details.
+
+% You should have received a copy of the GNU General Public License
+% along with this program; if not, write to the Free Software
+% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+% Prelude (helpful stuff..)
+
+% <int> <string> sendall - 
+% socket string
+/sendall
+{
+  /total 0 def
+  /thestring exch def
+  /thesocket exch def
+  /thelength thestring length def
+  /bytesleft thelength def
+{
+  total thelength lt {
+      thesocket
+      thestring total thelength total sub getinterval
+      thelength total sub 2 1 roll send
+      dup
+      -1 eq  {
+	      (error sending on socket\n) print flush
+	      quit
+      } if
+      dup
+      /total exch total add def
+      /bytesleft exch bytesleft sub def
+  } { exit }ifelse
+} loop
+} bind def
+      
+% concatenate two strings
+% string string - string
+/sconcat {
+	2 copy length exch length add   % find the length of the new.
+	string dup     			% string1 string2 string string
+	4 2 roll       			% string string string1 string2
+	2 index 0 3 index
+					% string string string1 string2 string 0 string1
+	putinterval    			% stuff the first string in.
+					% string string string1 string2
+	exch length exch putinterval	% string
+} bind def
+
+% given a socket, recv a line.
+% <socket> - string
+/recvline {
+    /foosock exch def
+	    {
+		true 1 foosock recv
+		1 lt { (error receiving on socket) print quit } if
+		dup (\n) eq { (got newline\n) print pop exit } if
+		sconcat
+	    } loop
+} bind def
+
+% trim the trailing character
+% <string> - string
+/rtrim {
+    dup length 1 sub 0 2 1 roll getinterval
+} bind def
+/ltrim {
+    dup length 1 sub 1 2 1 roll getinterval
+} bind def
+% decode a message, load it into our dict.
+% <string> - dict
+/messagedecode {
+    /msgdict 7 dict def 
+    /fooline exch def
+    fooline (:) search		      % match first ':'
+    true ne { (mdq 1st\n) print exit } if 
+    () ne   { (mdq 1.1st\n) print exit } if % should be nil prior
+    pop 			      % (:) - discard our search critera
+    /fooline exch def 		      % destructive update, yeah!
+
+    fooline (!) search		      % match '!'
+    true ne { (mdq 2nd\n) print exit } if
+    msgdict begin		      % load msgdict
+    (nick) exch store		      % add nick to dict
+    (pieces) 1 store
+    end				      % unload msgdict
+    pop				      % (!) discard
+    /fooline exch def		      % destructive update!
+
+    fooline (@) search		      % match '@'
+    true ne { (mdq 3rd\n) print exit } if 
+    msgdict begin		      % load msgdict
+    (user) exch store                 % store username
+    (pieces) 2 store
+    end				      % unload msgdict
+    pop				      % (@) discard
+    /fooline exch def	       	      % destructive update!
+
+    fooline ( ) search		      % match ' '
+    true ne { (mdq 4th\n) print exit } if 
+    msgdict begin	    	      % load msgdict
+    (hostname) exch store             % store the hostname
+    (pieces) 3 store
+    end				      % unload msgdict
+    pop                               % ( ) discard
+    /fooline exch def		      % destructive update!
+
+    fooline ( ) search		      % match ' '
+    true ne { (mdq 5th\n) print exit } if 
+    msgdict begin		      % load msgdict
+    (irccommand) exch store	      % store the irc command
+    (pieces) 4 store
+    end				      % unload msgdict
+    pop				      % ( ) discard
+    /fooline exch def                 % destructive update!
+
+    fooline ( ) search		      % match ' '
+    true ne { (mdq 6th\n) print exit } if
+    msgdict begin		      % load msgdict
+    (target) exch store               % store the target (channel)
+    (pieces) 5 store
+    pop                               % ( ) discard
+    rtrim
+    (message) exch store              % store the message
+    (pieces) 6 store
+    end                               % unload msgdict
+
+    msgdict (message) get
+
+    (:) anchorsearch                  % match start of string : to ltrim
+    true ne { (singular message decoded\n) print exit  } if
+    pop                               % (:) discard
+    msgdict begin
+    (message) exch store
+    (pieces) 6 store
+    end
+    count { pop (popping @ end of loop\n) print } repeat  % pop all remaining
+    (message decoded\n) print
+    
+} bind def
+
+/pingpong {
+    	% PING PONG?!	
+    
+	(PING :) anchorsearch
+	true eq {
+		    pop
+		    (PONG ) 2 1 roll
+		    sconcat
+		    (\n)
+		    sconcat
+		    mysocket 2 1 roll
+		    sendall
+                    count 1 eq { pop } if % current line
+		    (ping pong\n) print
+		    flush
+		    exit
+	} if
+
+	(PING ) anchorsearch
+	true eq {
+		    pop
+		    (PONG :) 2 1 roll
+		    sconcat
+		    (\n)
+		    sconcat
+		    mysocket 2 1 roll
+		    sendall
+                    count 1 eq { pop } if % current line
+		    (ping pong\n) print
+
+		    flush
+		    exit
+	} if
+} bind def
+
+/execproc {
+    (doing execproc\n) print
+    flush
+    msgdict (message) get
+    (%execthis ) search
+	true eq {
+	    (true in exec!\n) print flush
+	    msgdict (nick) get (jeffz) ne { exit } if
+	    pop pop
+	    cvx exec exit
+	} if
+	(false in exec proc\n) print flush
+	pop
+} bind def 
+/ircnick (NICK PSgoblin\n) def
+/ircuser (USER postscript hostname servername :PSgoblin\n) def
+/ircserver (irc.freenode.net) def
+/ircport 6667 def
+/factoids 10000 dict def 
+
+% forall is performed on actiondict, key is searched for in message, if found, value is executed
+/actiondict 5000 dict def
+actiondict (%dothis )
+    {
+	msgdict (nick) get (jeffz) ne { exit } if pop  msgdict (message) get (%dothis )
+	search pop pop pop (\n) sconcat mysocket 2 1 roll sendall count 1 eq { pop } if exit
+    } put % do what I say
+actiondict (hi PSgoblin)
+    {
+	(PRIVMSG ) msgdict (target) get sconcat ( :) sconcat
+	msgdict (nick) get sconcat (, hi!\n) sconcat
+	mysocket 2 1 roll sendall exit
+    } put % say hi to target
+
+errordict begin
+/zundefined { (is undefined ) } def
+end
+/mysocket socket def
+ircport ircserver mysocket connect
+-1 eq { (error connecting to host\n) print quit } if % kaput
+
+mysocket ircnick sendall
+mysocket ircuser sendall
+{ % main program loop
+    { % irc event loop
+
+	() 			% for sconcat.
+	mysocket recvline 	% recviece one line
+	pingpong      		% handles ping pong
+	messagedecode 		% gives msgdict
+	
+	msgdict (pieces) get
+	6 ne { exit } if
+	execproc
+	
+	actiondict { == == } forall
+	flush
+	actiondict {		% figure out what purpose I serve
+	    % v,k
+	    /actionval exch def
+	    /actionkey exch def
+	    msgdict { == == } forall
+	    flush
+	    msgdict (message) get %
+	    actionkey dup length string cvs
+	    search % search for key
+	    true eq {
+		    pop % pre
+		    pop % cur
+		    pop % post
+		    actionval exec
+	    } if
+	} forall
+    } loop
+  	stack
+%	(begin popping at end of loop\n) print
+	count { pop (popping @ end of loop\n) print } repeat
+%	(print done popping\n) print
+	flush
+} loop
+
